@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Low Poly Tree</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #dff3ea; font-family: system-ui, sans-serif; color: #24402f; }
+  #stage { width: min(94vw, 520px); aspect-ratio: 1; border-radius: 14px; overflow: hidden; touch-action: none; cursor: grab; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  p { text-align: center; opacity: .75; margin: 8px 0 0; }
+  main { display: flex; flex-direction: column; align-items: center; }
+  @media (prefers-color-scheme: dark) { body { background: #14261c; color: #d9f2e2; } }
+</style>
+</head>
+
+<body>
+<main>
+  <div id="stage"></div>
+  <p>Drag to rotate the tree.</p>
+</main>
+    <script>
+        // 1. SETUP: scene, camera, renderer
+        const stage = document.getElementById('stage');
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        stage.appendChild(renderer.domElement);
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
+        camera.position.set(0, 4, 9);
+        camera.lookAt(0, 2, 0);
+
+        // 2. LIGHTS
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x7a9b86, 0.9));
+        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
+        sun.position.set(5, 9, 6);
+        scene.add(sun);
+
+        // 3. MATERIALS: flatShading shows each flat face, which is the "low poly" look
+        function mat(color) { return new THREE.MeshLambertMaterial({ color, flatShading: true }); }
+        const bark   = mat(0x8a5a3c);
+        const leafA  = mat(0x2f9e5b);
+        const leafB  = mat(0x3fb36a);
+        const leafC  = mat(0x58c97c);
+        const ground = mat(0x9ad3a8);
+        const rock   = mat(0x9aa5a0);
+
+        // 4. BUILD THE TREE: a group keeps all the parts together so we can rotate them as one
+        const tree = new THREE.Group();
+
+        // ground: a cylinder with only 8 sides looks like a chunky island
+        const island = new THREE.Mesh(new THREE.CylinderGeometry(3, 3.3, 0.5, 8), ground);
+        island.position.y = -0.25;
+        tree.add(island);
+
+        // trunk: few sides, wider at the bottom
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 1.8, 6), bark);
+        trunk.position.y = 0.9;
+        tree.add(trunk);
+
+        // foliage: three stacked cones, each smaller and higher than the last
+        const tiers = [
+            { r: 1.7, h: 1.8, y: 2.1, m: leafA, spin: 0 },
+            { r: 1.3, h: 1.6, y: 3.0, m: leafB, spin: 0.4 },
+            { r: 0.9, h: 1.4, y: 3.8, m: leafC, spin: 0.8 },
+        ];
+        tiers.forEach(t => {
+            const cone = new THREE.Mesh(new THREE.ConeGeometry(t.r, t.h, 7), t.m);
+            cone.position.y = t.y;
+            cone.rotation.y = t.spin;   // turn each tier a bit so it looks less perfect
+            tree.add(cone);
+        });
+
+        // a few rocks: tiny 20-sided shapes (icosahedron with detail 0)
+        [[1.8, 0.2, 1.0, 0.4], [-1.6, 0.15, 1.4, 0.3], [-1.0, 0.12, -1.9, 0.25]].forEach(([x, y, z, s]) => {
+            const r = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), rock);
+            r.position.set(x, y, z);
+            r.rotation.set(x, z, 0);
+            tree.add(r);
+        });
+
+        scene.add(tree);
+
+        // 5. DRAG TO ROTATE: remember where the pointer went down, then turn the tree
+        let dragging = false, lastX = 0, spin = 0.005;
+        stage.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; });
+        window.addEventListener('pointerup', () => { dragging = false; });
+        window.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        tree.rotation.y += (e.clientX - lastX) * 0.01;
+        lastX = e.clientX;
+        });
+
+        // 6. ANIMATION LOOP: the same idea as your game loop
+        function frame() {
+            if (!dragging) tree.rotation.y += spin;   // slow auto-rotate
+            renderer.render(scene, camera);
+            requestAnimationFrame(frame);
+        }
+
+        function resize() {
+            const w = stage.clientWidth;
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+            renderer.setSize(w, w);
+            camera.aspect = 1;
+            camera.updateProjectionMatrix();
+        }
+        window.addEventListener('resize', resize);
+        resize();
+        frame();
+    </script>
+</body>
+</html>
