@@ -1,113 +1,363 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Low Poly Tree</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<style>
-  body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #dff3ea; font-family: system-ui, sans-serif; color: #24402f; }
-  #stage { width: min(94vw, 520px); aspect-ratio: 1; border-radius: 14px; overflow: hidden; touch-action: none; cursor: grab; }
-  #stage canvas { display: block; width: 100%; height: 100%; }
-  p { text-align: center; opacity: .75; margin: 8px 0 0; }
-  main { display: flex; flex-direction: column; align-items: center; }
-  @media (prefers-color-scheme: dark) { body { background: #14261c; color: #d9f2e2; } }
-</style>
-</head>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Low Poly Tree</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+        <style>
+            body { margin: 0; height: 100vh; height: 100dvh; overflow: hidden; background: #b47c7c; font-family: system-ui, sans-serif; color: #57ff9a; }
+            #stage { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+            #stage canvas { display: block; width: 100%; height: 100%; }
+            p { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; opacity: .75; margin: 0; pointer-events: none; }
+            @media (prefers-color-scheme: dark) { body { background: #7fcea2; color: #d9f2e2; } }
+        </style>
+    </head>
 
-<body>
-<main>
-  <div id="stage"></div>
-  <p>Drag to rotate the tree.</p>
-</main>
-    <script>
-        // 1. SETUP: scene, camera, renderer
-        const stage = document.getElementById('stage');
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        stage.appendChild(renderer.domElement);
-        const scene = new THREE.Scene();
-        const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 100);
-        camera.position.set(0, 4, 9);
-        camera.lookAt(0, 2, 0);
+    <body>
+        <main>
+            <div id="stage"></div>
+            <p>Drag to rotate.</p>
+        </main>
+        <script>
+            // 1. SETUP: scene, camera, renderer
+            const stage = document.getElementById('stage');
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            stage.appendChild(renderer.domElement);
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(40, 16/9, 0.1, 1000);
+            camera.position.set(0, 35, 60);
+            camera.lookAt(0, 2, 0);
 
-        // 2. LIGHTS
-        scene.add(new THREE.HemisphereLight(0xffffff, 0x7a9b86, 0.9));
-        const sun = new THREE.DirectionalLight(0xffffff, 0.8);
-        sun.position.set(5, 9, 6);
-        scene.add(sun);
+            // 2. LIGHTS
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x223322, 0.9));
+            const sun = new THREE.DirectionalLight(0xffd9a0, 0.8);
+            sun.position.set(5, 100, 6);
+            scene.add(sun);
 
-        // 3. MATERIALS: flatShading shows each flat face, which is the "low poly" look
-        function mat(color) { return new THREE.MeshLambertMaterial({ color, flatShading: true }); }
-        const bark   = mat(0x8a5a3c);
-        const leafA  = mat(0x2f9e5b);
-        const leafB  = mat(0x3fb36a);
-        const leafC  = mat(0x58c97c);
-        const ground = mat(0x9ad3a8);
-        const rock   = mat(0x9aa5a0);
+            // 3. MATERIALS: flatShading shows each flat face, which is the "low poly" look
+            function mat(color) { return new THREE.MeshLambertMaterial({ color, flatShading: true }); }
+            const ground = mat(0x9ad3a8);
+            const metal = mat(0xbbbbbb);
+            const train_mat = mat(0x00acac);
 
-        // 4. BUILD THE TREE: a group keeps all the parts together so we can rotate them as one
-        const tree = new THREE.Group();
+            // 4a. Build the ground : non moveable
+            const platform = new THREE.Group();
+            const ground1 = new THREE.Mesh(new THREE.BoxGeometry(40, 2, 20), ground);
+            ground1.position.set(4, 1, -10);
+            const ground2 = new THREE.Mesh(new THREE.BoxGeometry(8, 2, 8), ground);
+            ground2.position.set(-20, 1, -10);
+            platform.add(ground1);
+            platform.add(ground2);
+            scene.add(platform);
 
-        // ground: a cylinder with only 8 sides looks like a chunky island
-        const island = new THREE.Mesh(new THREE.CylinderGeometry(3, 3.3, 0.5, 8), ground);
-        island.position.y = -0.25;
-        tree.add(island);
+            // 4b. Build the railway
+            const railway = new THREE.Mesh(new THREE.BoxGeometry(200, 2, 10), ground);
+            railway.position.set(0, -3, -25);
+            platform.add(railway);
 
-        // trunk: few sides, wider at the bottom
-        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 1.8, 6), bark);
-        trunk.position.y = 0.9;
-        tree.add(trunk);
+            // 4c. Build the fences : non moveable
+            const fence_type1 = new THREE.Group();
+            const fence_type2 = new THREE.Group();
+            const subfence1a = new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,12), metal);
+            subfence1a.position.set(0, 0, 0); 
+            subfence1a.rotation.set(0, 0, Math.PI / 2);
+            const subfence1b = subfence1a.clone();
+            subfence1b.position.set(0, 1, 0);
+            subfence1b.rotation.set(0, 0, Math.PI / 2);
+            const subfence1c = new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,6), metal);
+            subfence1c.position.set(0, 0, 0); 
+            subfence1c.rotation.set(0, 0, Math.PI / 2);
+            const subfence1d = subfence1c.clone();
+            subfence1d.position.set(0, 1, 0); 
+            subfence1d.rotation.set(0, 0, Math.PI / 2);
+            const subfence2a = new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,2), metal);
+            subfence2a.position.set(0, 0, 0);
+            const subfence2b = subfence2a.clone();
+            subfence2b.position.set(3, 0, 0);
+            const subfence2c = subfence2a.clone();
+            subfence2c.position.set(-3, 0, 0);
+            const subfence2d = subfence2a.clone();
+            subfence2d.position.set(6, 0, 0);
+            const subfence2e = subfence2a.clone();
+            subfence2e.position.set(-6, 0, 0);
+            const subfence3a = new THREE.Mesh(new THREE.SphereGeometry(.1,10,10), metal)
+            subfence3a.position.set(6, 1, 0);
+            const subfence3b = subfence3a.clone();
+            subfence3b.position.set(-6, 1, 0);
+            const subfence3c = subfence3a.clone();
+            subfence3c.position.set(-3, 1, 0);
+            const subfence3d = subfence3a.clone();
+            subfence3d.position.set(3, 1, 0);
 
-        // foliage: three stacked cones, each smaller and higher than the last
-        const tiers = [
-            { r: 1.7, h: 1.8, y: 2.1, m: leafA, spin: 0 },
-            { r: 1.3, h: 1.6, y: 3.0, m: leafB, spin: 0.4 },
-            { r: 0.9, h: 1.4, y: 3.8, m: leafC, spin: 0.8 },
-        ];
-        tiers.forEach(t => {
-            const cone = new THREE.Mesh(new THREE.ConeGeometry(t.r, t.h, 7), t.m);
-            cone.position.y = t.y;
-            cone.rotation.y = t.spin;   // turn each tier a bit so it looks less perfect
-            tree.add(cone);
-        });
+            fence_type1.add(subfence1a);
+            fence_type1.add(subfence1b);
+            fence_type1.add(subfence2a);
+            fence_type1.add(subfence2b);
+            fence_type1.add(subfence2c);
+            fence_type1.add(subfence2d);
+            fence_type1.add(subfence2e);
+            fence_type1.add(subfence3a);
+            fence_type1.add(subfence3b);
+            fence_type2.add(subfence1c);
+            fence_type2.add(subfence1d);
+            fence_type2.add(subfence2a.clone());        // 1 object can't be in more than 1 parent, so make the clone
+            fence_type2.add(subfence2b.clone());
+            fence_type2.add(subfence2c.clone());
+            fence_type2.add(subfence3c);
+            fence_type2.add(subfence3d);
 
-        // a few rocks: tiny 20-sided shapes (icosahedron with detail 0)
-        [[1.8, 0.2, 1.0, 0.4], [-1.6, 0.15, 1.4, 0.3], [-1.0, 0.12, -1.9, 0.25]].forEach(([x, y, z, s]) => {
-            const r = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), rock);
-            r.position.set(x, y, z);
-            r.rotation.set(x, z, 0);
-            tree.add(r);
-        });
+            const fence_type1_copy1 = fence_type1.clone();
+            fence_type1_copy1.position.set(-8.75, 3, -0.5);
+            fence_type1_copy1.rotation.set(0, 0, 0);
+            const fence_type1_copy2 = fence_type1.clone();
+            fence_type1_copy2.position.set(4, 3, -0.5);
+            fence_type1_copy2.rotation.set(0, 0, 0);
+            const fence_type1_copy3 = fence_type1.clone();
+            fence_type1_copy3.position.set(16.75, 3, -0.5);
+            fence_type1_copy3.rotation.set(0, 0, 0);
+            const fence_type1_copy4 = fence_type1.clone();
+            fence_type1_copy4.position.set(23.5, 3, -6.5);
+            fence_type1_copy4.rotation.set(0, Math.PI / 2, 0);
 
-        scene.add(tree);
+            const fence_type2_copy1 = fence_type2.clone();
+            fence_type2_copy1.position.set(-15.5, 3, -16.5);
+            fence_type2_copy1.rotation.set(0, Math.PI / 2, 0);
+            const fence_type2_copy2 = fence_type2.clone();
+            fence_type2_copy2.position.set(-15.5, 3, -3.5);
+            fence_type2_copy2.rotation.set(0, Math.PI / 2, 0);
+            const fence_type2_copy3 = fence_type2.clone();
+            fence_type2_copy3.position.set(23.5, 3, -16.5);
+            fence_type2_copy3.rotation.set(0, Math.PI / 2, 0);
+            const fence_type2_copy4 = fence_type2.clone();
+            fence_type2_copy4.position.set(-19.5, 3, -13.5);
+            fence_type2_copy4.rotation.set(0, 0, 0);
+            const fence_type2_copy5 = fence_type2.clone();
+            fence_type2_copy5.position.set(-19.5, 3, -6.5);
+            fence_type2_copy5.rotation.set(0, 0, 0);
 
-        // 5. DRAG TO ROTATE: remember where the pointer went down, then turn the tree
-        let dragging = false, lastX = 0, spin = 0.005;
-        stage.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; });
-        window.addEventListener('pointerup', () => { dragging = false; });
-        window.addEventListener('pointermove', e => {
-        if (!dragging) return;
-        tree.rotation.y += (e.clientX - lastX) * 0.01;
-        lastX = e.clientX;
-        });
+            platform.add(fence_type1_copy1);
+            platform.add(fence_type1_copy2);
+            platform.add(fence_type1_copy3);
+            platform.add(fence_type1_copy4);
+            platform.add(fence_type2_copy1);
+            platform.add(fence_type2_copy2);
+            platform.add(fence_type2_copy3);
+            platform.add(fence_type2_copy4);
+            platform.add(fence_type2_copy5);
 
-        // 6. ANIMATION LOOP: the same idea as your game loop
-        function frame() {
-            if (!dragging) tree.rotation.y += spin;   // slow auto-rotate
-            renderer.render(scene, camera);
-            requestAnimationFrame(frame);
-        }
+            // 4d. Build the train : moveable
+            const trainMaxSpeed = 0.5;
+            let trainSpeed = trainMaxSpeed;
+            let trainDistance = 40;
+            let trainAccelaration = (trainMaxSpeed * trainMaxSpeed) / (2 * trainDistance);
+            let trainState = 'cruise';
+            const train_all = new THREE.Group();
+            const train1 = new THREE.Mesh(new THREE.BoxGeometry(20, 8, 8), train_mat);
+            const train2 = train1.clone();
+            train1.position.set(14.25, 4, -25);
+            train2.position.set(-6.25, 4, -25);
+            train_all.add(train1);
+            train_all.add(train2);
+            train_all.position.set(-100, 0, 0);
+            scene.add(train_all);
 
-        function resize() {
-            const w = stage.clientWidth;
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-            renderer.setSize(w, w);
-            camera.aspect = 1;
-            camera.updateProjectionMatrix();
-        }
-        window.addEventListener('resize', resize);
-        resize();
-        frame();
-    </script>
-</body>
+            // 4e. Build the anouncement board
+            const board = new THREE.Mesh(new THREE.BoxGeometry(0.5, 6, 8), train_mat);
+            board.position.set(22, 5, -10);
+            platform.add(board);
+
+            // 4f. Build the bench
+            const bench = new THREE.Group();
+            const subbench1a = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1, 1.7))
+            subbench1a.position.set(0, 0, 0);
+            const subbench1b = subbench1a.clone();
+            subbench1a.position.set(2.5, 0, 0);
+            const subbench1c = subbench1a.clone();
+            subbench1c.position.set(-2.5, 0, 0);
+            const subbench2 = new THREE.Mesh(new THREE.BoxGeometry(6, .3, 2))
+            subbench2.position.set(0, 0.65, 0);
+            bench.add(subbench1a);
+            bench.add(subbench1b);
+            bench.add(subbench1c);
+            bench.add(subbench2);
+            const bench1 = bench.clone();
+            bench1.position.set(10, 2.5, -5);
+            const bench2 = bench.clone();
+            bench2.position.set(0, 2.5, -5);
+            platform.add(bench1);
+            platform.add(bench2);
+
+            // 4g. Build the canopy
+            const canopy = new THREE.Group();
+            const subcanopy1a = new THREE.Group();
+            const subcanopy1aa = new THREE.Mesh(new THREE.CylinderGeometry(1, 1.3, 2.5, 4));
+            subcanopy1aa.position.set(0, 0, 0);
+            subcanopy1aa.rotation.set(0, Math.PI / 4, 0);
+            const subcanopy1ab = new THREE.Mesh(new THREE.BoxGeometry(0.9, 6, 0.9));
+            subcanopy1ab.position.set(0, 4, 0);
+            const subcanopy1ac = new THREE.Mesh(new trapezoidBox (1, 4, 2, 1));
+            subcanopy1ac.position.set(0, 8, 0);
+            subcanopy1ac.rotation.set(0, Math.PI / 2, 0);
+            const subcanopy1ad = new THREE.Mesh(new trapezoidBox (8, 0, 2, 1));
+            subcanopy1ad.position.set(0, 10, 0);
+            subcanopy1ad.rotation.set(0, Math.PI / 2, 0);
+            subcanopy1a.add(subcanopy1aa);
+            subcanopy1a.add(subcanopy1ab);
+            subcanopy1a.add(subcanopy1ac);
+            subcanopy1a.add(subcanopy1ad);
+            const subcanopy1b = subcanopy1a.clone();
+            subcanopy1b.position.set(10, 0, 0);
+            const subcanopy1c = subcanopy1a.clone();
+            subcanopy1c.position.set(-10, 0, 0);
+            const subcanopy2a = new THREE.Mesh(new THREE.BoxGeometry(25, 6, 0.3));
+            subcanopy2a.position.set(0, 11 - 1/Math.sqrt(5)*3, -2/Math.sqrt(5)*3);
+            subcanopy2a.rotation.set(Math.PI / 2 - Math.atan(0.5), 0, 0);
+            const subcanopy2b = subcanopy2a.clone();
+            subcanopy2b.position.set(0, 11 - 1/Math.sqrt(5)*3, 2/Math.sqrt(5)*3);
+            subcanopy2b.rotation.set(Math.PI / 2 + Math.atan(0.5), 0, 0);
+            const subcanopy2c = new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, 25, 10));
+            subcanopy2c.position.set(0, 11, 0);
+            subcanopy2c.rotation.set(0, 0, Math.PI / 2);
+            canopy.add(subcanopy1a);
+            canopy.add(subcanopy1b);
+            canopy.add(subcanopy1c);
+            canopy.add(subcanopy2a);
+            canopy.add(subcanopy2b);
+            canopy.add(subcanopy2c);
+            canopy.position.set(5, 3.2, -5);
+            scene.add(canopy);
+
+            // Add edge line in all objects
+            const lineMat = new THREE.LineBasicMaterial({ color: 0x14261c });
+            const meshes = [];
+            scene.traverse(obj => { if (obj.isMesh) meshes.push(obj); });
+            meshes.forEach(obj => {
+                const edges = new THREE.LineSegments(new THREE.EdgesGeometry(obj.geometry), lineMat);
+                obj.add(edges);
+            });
+
+            // 5. Click to rotate and move
+            let dragging = false, lastX = 0, lastY = 0, spin = 0.005;
+            stage.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
+            window.addEventListener('pointerup', () => { dragging = false; });
+            window.addEventListener('pointermove', e => {
+                if (!dragging) return;
+                scene.rotation.x += (e.clientY - lastY) * spin;
+                scene.rotation.y += (e.clientX - lastX) * spin;
+                lastX = e.clientX;
+                lastY = e.clientY;
+            });
+
+            // ======================================================================= Function Start
+            // Build trapeoid mesh
+            function trapezoidBox(bottomW, topW, height, depth) {
+                const geo = new THREE.BoxGeometry(bottomW, height, depth);
+                const pos = geo.attributes.position;
+                const scale = topW / bottomW;
+
+                for (let i = 0; i < pos.count; i++) {
+                    if (pos.getY(i) > 0) {                    // top vertices only
+                    pos.setX(i, pos.getX(i) * scale);       // pull them in (or out)
+                    }
+                }
+                geo.computeVertexNormals();
+                return geo;
+            }
+            // ======================================================================= Function End
+
+            // Scroll to zoom
+            const views = [
+                { pos: camera.position.clone(),     look: new THREE.Vector3(0, 2, 0) },     // initial view
+                { pos: new THREE.Vector3(0, 4, 9),  look: new THREE.Vector3(0, 2, 0) },     // front
+                { pos: new THREE.Vector3(9, 4, 0),  look: new THREE.Vector3(0, 2, 0) },     // side
+                { pos: new THREE.Vector3(0, 14, 2), look: new THREE.Vector3(0, 0, 0) },     // top
+                { pos: new THREE.Vector3(-8, 6, 8), look: new THREE.Vector3(0, 1, 0) },     // corner
+            ];
+            let viewIndex = 0;
+            const camPos  = views[0].pos.clone();
+            const camLook = views[0].look.clone();
+            const offset  = new THREE.Vector3();
+            let zoom = 1, zoomTarget = 1;
+            stage.addEventListener('wheel', e => {
+                e.preventDefault();                          // stop the page from scrolling
+                zoomTarget *= e.deltaY < 0 ? 0.9 : 1.1;      // scroll up = closer, scroll down = farther
+                zoomTarget = Math.max(0.3, Math.min(2.5, zoomTarget));
+            }, { passive: false });
+
+            // 6. ANIMATION LOOP: the same idea as your game loop
+            let train_wait_time = 0;
+            function frame() {
+                zoom += (zoomTarget - zoom) * 0.12;          // glide toward the zoom level
+                offset.copy(camPos).sub(camLook).multiplyScalar(zoom);
+                camera.position.copy(camLook).add(offset);
+                camera.lookAt(camLook);
+                
+                const x = train_all.position.x;
+                // if (train_all.position.x > -1*trainDistance && (trainStatus == 'move' || trainStatus == 'speed down')) {
+                //     trainSpeed = trainSpeed - trainAccelaration;
+                //     trainStatus = 'speed down';
+                //     if (trainSpeed < 0) trainSpeed = 0;
+                // }else if (trainSpeed <= 0) {
+                //     trainStatus = 'stop';
+                //     train_wait_time++;
+                // }else if (train_wait_time > 10) {
+                //     trainSpeed = trainSpeed + trainAccelaration;
+                //     trainStatus = 'speed up';
+                //     if (trainSpeed > trainMaxSpeed && trainStatus == 'speed up') {
+                //         trainSpeed = trainMaxSpeed;
+                //         trainStatus == 'move';
+                //         train_wait_time = 0;
+                //     };
+                // };
+
+                switch (trainState) {
+                    case 'cruise':
+                        if (x >= -1*trainDistance && x < 0) {
+                            trainState = 'braking';
+                        }
+                        break;
+
+                    case 'braking':
+                        trainSpeed -= trainAccelaration;
+                        if (trainSpeed <= 0) {
+                            trainSpeed = 0;
+                            train_wait_time = 0;
+                            trainState = 'waiting';
+                        }
+                        break;
+
+                    case 'waiting':
+                        train_wait_time++;
+                        if (train_wait_time >= 100) trainState = 'departing';
+                        break;
+
+                    case 'departing':
+                        trainSpeed += trainAccelaration;
+                        if (trainSpeed >= trainMaxSpeed) {
+                            trainSpeed = trainMaxSpeed;
+                            trainState = 'cruise';
+                        }
+                        break;
+                    }
+                    
+                train_all.position.x += trainSpeed;
+                if (train_all.position.x > 100) train_all.position.x = -100;
+
+                renderer.render(scene, camera);
+                requestAnimationFrame(frame);
+            }
+
+            function resize() {
+                const w = stage.clientWidth;
+                renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+                renderer.setSize(w, w);
+                camera.aspect = 1;
+                camera.updateProjectionMatrix();
+            }
+            window.addEventListener('resize', resize);
+            resize();
+            frame();
+        </script>
+    </body>
 </html>
