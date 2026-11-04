@@ -3,99 +3,1065 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Low Poly Tree</title>
+        <title>Train Stop</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
         <style>
-            body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #000000; font-family: system-ui, sans-serif; color: #57ff9a; }
-            #stage { width: min(100vw, 1800px); aspect-ratio: 16/9; border-radius: 14px; overflow: hidden; touch-action: none; cursor: grab; }
+            body { margin: 0; height: 100vh; height: 100dvh; overflow: hidden; background: #b47c7c; font-family: system-ui, sans-serif; color: #57ff9a; }
+            #stage { position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
             #stage canvas { display: block; width: 100%; height: 100%; }
-            p { text-align: center; opacity: .75; margin: 8px 0 0; }
-            main { display: flex; flex-direction: column; align-items: center; }
-            @media (prefers-color-scheme: dark) { body { background: #14261c; color: #d9f2e2; } }
+            p { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; opacity: .75; margin: 0; pointer-events: none; }
+            @media (prefers-color-scheme: dark) { body { background: #c7f3f7; color: #d9f2e2; } }
         </style>
     </head>
 
     <body>
         <main>
             <div id="stage"></div>
-            <p>Drag to rotate the tree.</p>
+            <p></p>
+            <p id="prompt"></p>
         </main>
         <script>
             // 1. SETUP: scene, camera, renderer
             const stage = document.getElementById('stage');
-            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.shadowMap.enabled = true;
             stage.appendChild(renderer.domElement);
             const scene = new THREE.Scene();
-            const camera = new THREE.PerspectiveCamera(40, 16/9, 0.1, 100);
-            camera.position.set(0, 14, 20);
-            camera.lookAt(0, -2, 0);
+            const camera = new THREE.PerspectiveCamera(40, 16/9, 0.1, 1000);
+            camera.position.set(0, 5, 60);
+            camera.lookAt(0, 0, 0);
 
             // 2. LIGHTS
-            scene.add(new THREE.HemisphereLight(0xffffff, 0x223322, 0.9));
-            const sun = new THREE.DirectionalLight(0xffd9a0, 0.8);
-            sun.position.set(5, 100, 6);
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x7a9b86, 0.8));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.9);
+            sun.position.set(50, 50, -50);
+            sun.castShadow = true;
+            sun.shadow.mapSize.set(4096, 4096);
+            Object.assign(sun.shadow.camera, { left: -100, right: 100, top: 100, bottom: -100, near: 1, far: 200 });
+            sun.shadow.bias = -0.001;
             scene.add(sun);
 
             // 3. MATERIALS: flatShading shows each flat face, which is the "low poly" look
             function mat(color) { return new THREE.MeshLambertMaterial({ color, flatShading: true }); }
-            const bark   = mat(0x8a5a3c);
-            const leafA  = mat(0xd9822b);
-            const leafB  = mat(0x3fb36a);
-            const leafC  = mat(0x58c97c);
             const ground = mat(0x9ad3a8);
-            const rock   = mat(0x9aa5a0);
+            const metal = mat(0xbbbbbb);
+            const bark   = mat(0x8a5a3c);
+            const leafA  = mat(0x3fb36a);
+            const leafB  = mat(0x58c97c);
+            const leafC  = mat(0x58c97c);
+            const metal2  = mat(0xfbfbfb);
+            const stone  = mat(0xfefefe);
+            const stone2  = mat(0xababab);
 
-            // 4. BUILD THE TREE: a group keeps all the parts together so we can rotate them as one
-            const tree = new THREE.Group();
+            function getHeight(x, z) {
+                let h = Math.sin(x * 0.15) * Math.cos(z * 0.12) * 0.3
+                        + Math.sin(x * 0.07 + 1.3) * Math.sin(z * 0.09 + 0.5) * 0.5
+                        + Math.sin(x * 0.31 + z * 0.27) * 0.4;
+                h = Math.max(0, h);                                         // valleys become flat ground, hills stay
 
-            // ground: a cylinder with only 8 sides looks like a chunky island
-            const island = new THREE.Mesh(new THREE.CylinderGeometry(3, 3.3, 0.5, 10), ground);
-            island.position.y = -0.25;
-            tree.add(island);
+                const smooth = t => { t = Math.min(1, Math.max(0, t)); return t * t * (3 - 2 * t); };
+                const centerFlat = smooth((Math.hypot(x, z) - 12) / 14);    // flat near the middle (station and track)
+                const edgeFlat = 1 - smooth((Math.max(Math.abs(x), Math.abs(z)) - 14) / 6);   // flat at the border
+                // return h * centerFlat * edgeFlat;
+                return h;
+            }
 
-            // trunk: few sides, wider at the bottom
-            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 1.8, 6), bark);
-            trunk.position.y = 0.9;
-            tree.add(trunk);
+            function makeTerrain(size, seg, band) {
+                const geo = new THREE.PlaneGeometry(size, size, seg, seg);
+                geo.rotateX(-Math.PI / 2);                                  // lay it flat
+                const p = geo.attributes.position;
+                for (let i = 0; i < p.count; i++) p.setY(i, getHeight(p.getX(i), p.getZ(i)));
 
-            // foliage: three stacked cones, each smaller and higher than the last
-            const tiers = [
-                { r: 1.7, h: 1.8, y: 2.1, m: leafA, spin: 0 },
-                { r: 1.3, h: 1.6, y: 3.0, m: leafB, spin: 0.4 },
-                { r: 0.9, h: 1.4, y: 3.8, m: leafC, spin: 0.8 },
+                const g = geo.toNonIndexed();                               // each triangle gets its own vertices
+                const pos = g.attributes.position;
+                const palette = [0x9ad3a8, 0x7cc596, 0x5fb383, 0xb9c98a, 0xc9b58a, 0x9aa5a0, 0xf2f2f2].map(c => new THREE.Color(c));
+                const colors = [];
+                for (let i = 0; i < pos.count; i += 3) {
+                    const h = (pos.getY(i) + pos.getY(i + 1) + pos.getY(i + 2)) / 3;       // the triangle's average height
+                    const c = palette[Math.min(palette.length - 1, Math.floor(h / band))]; // which band it falls in
+                    for (let k = 0; k < 3; k++) colors.push(c.r, c.g, c.b);
+                }
+                g.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                g.computeVertexNormals();
+                return g;
+            }
+
+            const terrain = new THREE.Mesh(
+                makeTerrain(200, 50, 1),                                   // size, grid cells per side, band height
+                new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true,
+                                                polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 })
+            );
+            terrain.position.set(0, -1, 0);
+            terrain.receiveShadow = true;
+            terrain.castShadow = true;
+            scene.add(terrain);
+
+
+
+            // 4a. Build the platform : non moveable
+            const obstacles = [];                                                       // obstacle array
+            const platform = new THREE.Group();
+            const ground1 = new THREE.Mesh(new THREE.BoxGeometry(40, 4, 20), stone);
+            ground1.position.set(4, 0, -10);
+            const ground2 = new THREE.Mesh(new THREE.BoxGeometry(8, 4, 8), stone);
+            ground2.position.set(-20, 0, -10);
+            platform.add(ground1);
+            platform.add(ground2);
+            scene.add(platform); 
+            addBlock(-20, -3, 9, 7);  
+            addBlock(-20, -17, 9, 7);           
+
+            // 4b. Build the railway
+            const railway_lenght = 500;
+            const railway = new THREE.Group();
+            const railway_base = new THREE.Mesh(new THREE.BoxGeometry(railway_lenght, 2, 10), stone2);
+            railway.add(railway_base);
+            const railway_block = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 8), bark);
+            for (let i = -railway_lenght/2; i <= railway_lenght/2; i++) {
+                if (Math.abs(i) % 3 == 0) {
+                    const block = railway_block.clone();   // a new copy each time
+                    block.position.set(i, 1, 0);
+                    railway.add(block);
+                }
+            }
+            const railway_side1 = new THREE.Mesh(new THREE.BoxGeometry(railway_lenght, 0.4, 0.4), metal);
+            railway_side1.position.set(0, 1.5, -3);
+            railway.add(railway_side1);
+            const railway_side2 = railway_side1.clone();
+            railway_side2.position.set(0, 1.5, 3);
+            railway.add(railway_side2);
+            railway.position.set(0, -1, -25);
+            platform.add(railway);
+
+            // 4c. Build the fences : non moveable
+            const fence_type1 = new THREE.Group();
+            const fence_type2 = new THREE.Group();
+            const subfence1a = new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,12), metal);
+            subfence1a.position.set(0, 0, 0); 
+            subfence1a.rotation.set(0, 0, Math.PI / 2);
+            const subfence1b = subfence1a.clone();
+            subfence1b.position.set(0, 1, 0);
+            subfence1b.rotation.set(0, 0, Math.PI / 2);
+            const subfence1c = new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,6), metal);
+            subfence1c.position.set(0, 0, 0); 
+            subfence1c.rotation.set(0, 0, Math.PI / 2);
+            const subfence1d = subfence1c.clone();
+            subfence1d.position.set(0, 1, 0); 
+            subfence1d.rotation.set(0, 0, Math.PI / 2);
+            const subfence2a = new THREE.Mesh(new THREE.CylinderGeometry(.1,.1,2), metal);
+            subfence2a.position.set(0, 0, 0);
+            const subfence2b = subfence2a.clone();
+            subfence2b.position.set(3, 0, 0);
+            const subfence2c = subfence2a.clone();
+            subfence2c.position.set(-3, 0, 0);
+            const subfence2d = subfence2a.clone();
+            subfence2d.position.set(6, 0, 0);
+            const subfence2e = subfence2a.clone();
+            subfence2e.position.set(-6, 0, 0);
+            const subfence3a = new THREE.Mesh(new THREE.SphereGeometry(.1,10,10), metal)
+            subfence3a.position.set(6, 1, 0);
+            const subfence3b = subfence3a.clone();
+            subfence3b.position.set(-6, 1, 0);
+            const subfence3c = subfence3a.clone();
+            subfence3c.position.set(-3, 1, 0);
+            const subfence3d = subfence3a.clone();
+            subfence3d.position.set(3, 1, 0);
+
+            fence_type1.add(subfence1a);
+            fence_type1.add(subfence1b);
+            fence_type1.add(subfence2a);
+            fence_type1.add(subfence2b);
+            fence_type1.add(subfence2c);
+            fence_type1.add(subfence2d);
+            fence_type1.add(subfence2e);
+            fence_type1.add(subfence3a);
+            fence_type1.add(subfence3b);
+            fence_type2.add(subfence1c);
+            fence_type2.add(subfence1d);
+            fence_type2.add(subfence2a.clone());        // 1 object can't be in more than 1 parent, so make the clone
+            fence_type2.add(subfence2b.clone());
+            fence_type2.add(subfence2c.clone());
+            fence_type2.add(subfence3c);
+            fence_type2.add(subfence3d);
+
+            const fence_type1_copy1 = fence_type1.clone();
+            fence_type1_copy1.position.set(-8.75, 3, -0.5);
+            fence_type1_copy1.rotation.set(0, 0, 0);
+            const fence_type1_copy2 = fence_type1.clone();
+            fence_type1_copy2.position.set(4, 3, -0.5);
+            fence_type1_copy2.rotation.set(0, 0, 0);
+            const fence_type1_copy3 = fence_type1.clone();
+            fence_type1_copy3.position.set(16.75, 3, -0.5);
+            fence_type1_copy3.rotation.set(0, 0, 0);
+            const fence_type1_copy4 = fence_type1.clone();
+            fence_type1_copy4.position.set(23.5, 3, -6.5);
+            fence_type1_copy4.rotation.set(0, Math.PI / 2, 0);
+
+            const fence_type2_copy1 = fence_type2.clone();
+            fence_type2_copy1.position.set(-15.5, 3, -16.5);
+            fence_type2_copy1.rotation.set(0, Math.PI / 2, 0);
+            const fence_type2_copy2 = fence_type2.clone();
+            fence_type2_copy2.position.set(-15.5, 3, -3.5);
+            fence_type2_copy2.rotation.set(0, Math.PI / 2, 0);
+            const fence_type2_copy3 = fence_type2.clone();
+            fence_type2_copy3.position.set(23.5, 3, -16.5);
+            fence_type2_copy3.rotation.set(0, Math.PI / 2, 0);
+            const fence_type2_copy4 = fence_type2.clone();
+            fence_type2_copy4.position.set(-19.5, 3, -13.5);
+            fence_type2_copy4.rotation.set(0, 0, 0);
+            const fence_type2_copy5 = fence_type2.clone();
+            fence_type2_copy5.position.set(-19.5, 3, -6.5);
+            fence_type2_copy5.rotation.set(0, 0, 0);
+
+            platform.add(fence_type1_copy1);
+            platform.add(fence_type1_copy2);
+            platform.add(fence_type1_copy3);
+            platform.add(fence_type1_copy4);
+            platform.add(fence_type2_copy1);
+            platform.add(fence_type2_copy2);
+            platform.add(fence_type2_copy3);
+            platform.add(fence_type2_copy4);
+            platform.add(fence_type2_copy5);
+
+            // 4d. Build the train : moveable
+            const trainMaxSpeed = 0.5;
+            let trainSpeed = trainMaxSpeed;
+            let trainDistance = 80;
+            let trainAccelaration = (trainMaxSpeed * trainMaxSpeed) / (2 * (trainDistance+3));
+            let trainState = 'cruise';
+
+            // open-ended shell between two outlines ([z, y] points): the sides only, no end caps
+            function loftSides(A, B, xA, xB, k = 0) {
+                const pos = [];
+                const ra = A.map(([z, y]) => [xA, y, z]);
+                const rb = B.map(([z, y]) => [xB - k * (y - B[0][1]), y, z]);
+                const n = A.length;
+                for (let i = 0; i < n; i++) {
+                    const j = (i + 1) % n;
+                    pos.push(...ra[i], ...rb[i], ...rb[j], ...ra[i], ...rb[j], ...ra[j]);
+                }
+                const g = new THREE.BufferGeometry();
+                g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+                g.computeVertexNormals();
+                return g;
+            }
+
+            // one flat polygon (the sloped front face)
+            function capFan(P, x, k = 0) {
+                const pts = P.map(([z, y]) => [x - k * (y - P[0][1]), y, z]);
+                const pos = [];
+                for (let i = 1; i < pts.length - 1; i++) pos.push(...pts[0], ...pts[i], ...pts[i + 1]);
+                const g = new THREE.BufferGeometry();
+                g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+                g.computeVertexNormals();
+                return g;
+            }
+
+            function makeTrain() {
+                const mat = (c, side) => new THREE.MeshLambertMaterial({ color: c, flatShading: true, side: side || THREE.FrontSide });
+                const red = mat(0xc4122f, THREE.DoubleSide), redDark = mat(0x8f0f26);
+                const plum = mat(0x3d2a45, THREE.DoubleSide), steel = mat(0x5b5560), black = mat(0x2a2630);
+                const roofGrey = mat(0x8a8590), roofLight = mat(0xe2ddd6), floorM = mat(0x6b6470);
+                const seatM = mat(0x4a6fa5), seatDark = mat(0x35517c);
+                const yellow = mat(0xf2b632), green = mat(0x4fc46a), signRed = mat(0xff5a4f);
+                const lamp = new THREE.MeshBasicMaterial({ color: 0xffeaa0 });
+                const glass = new THREE.MeshLambertMaterial({ color: 0x7fb8d8, transparent: true, opacity: 0.3, depthWrite: false });
+
+                const L = 16, NOSE_LEN = 3.5, K = 0.4, tilt = Math.atan(K);
+                const BODY = [[-3, 1], [3, 1], [3, 4.9], [2.2, 6], [-2.2, 6], [-3, 4.9]];      // cross-section [z, y]
+                const NOSE = [[-2.6, 1.5], [2.6, 1.5], [2.6, 4.3], [1.9, 5.1], [-1.9, 5.1], [-2.6, 4.3]];
+                const frontX = y => L / 2 - K * (y - 1.5);
+                const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+                const roofs = [];                                                               // roof parts, so you can hide them
+
+                function makeCar(hasNose, hasPantograph) {
+                    const car = new THREE.Group();
+                    const roof = new THREE.Group();
+                    car.add(roof);
+                    roofs.push(roof);
+                    const put = (geo, material, x, y, z, parent = car) => {
+                    const mesh = new THREE.Mesh(geo, material);
+                    mesh.position.set(x, y, z);
+                    parent.add(mesh);
+                    return mesh;
+                    };
+
+                    const end = hasNose ? L / 2 - NOSE_LEN : L / 2;      // where the straight section stops
+                    const len = end + L / 2, mid = (end - L / 2) / 2;
+                    const count = hasNose ? 5 : 6;
+                    const xs = Array.from({ length: count }, (_, i) => -6.4 + i * 2.3);
+
+                    // ---- floor and underframe ----
+                    put(box(len, 0.2, 5.4), floorM, mid, 1.2, 0);
+                    put(box(L - 2, 0.45, 4.4), steel, 0, 0.85, 0);
+
+                    // ---- side walls with openings (pillars between windows, sills below them) ----
+                    const openings = xs.map((x, i) => i === 2
+                    ? { x0: x - 0.75, x1: x + 0.75, y0: 1.3, door: true }
+                    : { x0: x - 0.85, x1: x + 0.85, y0: 3.3 });
+                    [-1, 1].forEach(s => {
+                        const zc = s * 2.85;                                // wall is 0.3 thick, between z = 2.7 and 3.0
+                        let prev = -L / 2;
+                        const pillar = (a, b) => { if (b - a > 0.01) put(box(b - a, 3.8, 0.3), red, (a + b) / 2, 2.9, zc); };
+                        openings.forEach(o => {
+                            pillar(prev, o.x0);
+                            prev = o.x1;
+                            const w = o.x1 - o.x0, cx = (o.x0 + o.x1) / 2;
+                            const sill = o.y0 - 1.0;                          // from the floor edge up to the opening
+                            put(box(w, sill, 0.3), redDark, cx, 1.0 + sill / 2, zc);
+                            if (o.door) {      
+                                [-0.4, 0.4].forEach(dx => {
+                                    put(box(0.8, 3.5, 0.06), glass, cx + dx, 3.05, zc);
+                                    // put(box(0.1, 3.5, 0.1), redDark, cx, 3.05, zc);
+                                });
+                            } else {
+                                put(box(w, 1.5, 0.06), glass, cx, 4.05, zc);
+                            }
+                        });
+                        pillar(prev, end);
+
+                        // roof edge on this side: a sloped panel from the wall top up to the roof
+                        const sh = put(box(len, 0.15, 1.442), red, mid, 5.4, s * 2.6, roof);
+                        sh.material = red;
+                        sh.rotation.x = s * Math.atan2(1.2, 0.8);
+                    });
+
+                    // ---- roof (in the "roof" group) ----
+                    put(box(len, 0.2, 4.4), red, mid, 5.9, 0, roof);
+                    put(box(len - 2, 0.1, 1.6), roofLight, mid, 6.05, 0, roof);
+                    [-3, 1.5].forEach(x => put(box(3.6, 0.35, 2.0), roofGrey, x, 6.12, 0, roof));
+
+                    // ---- interior: seats under the windows, poles, ceiling lights ----
+                    xs.forEach((x, i) => {
+                        put(box(0.5, 0.05, 1.2), lamp, x, 5.77, 0);                                  // ceiling light (stays with the car)
+                        if (i !== 2) [-1, 1].forEach(s => {
+                            put(box(1.5, 0.5, 0.9), seatM, x, 1.55, s * 2.15);                         // seat
+                            put(box(1.5, 1.0, 0.2), seatDark, x, 2.3, s * 2.55);                       // backrest
+                        });
+                        if (i < count - 1 || !hasNose) {
+                            put(new THREE.CylinderGeometry(0.06, 0.06, 4.5, 6), yellow, x + 1.15, 3.55, 0);   // pole
+                        }
+                    });
+
+                    // ---- bogies and wheels ----
+                    [-5.4, 5.4].forEach(bx => {
+                        put(box(3.6, 0.4, 4.6), steel, bx, 0.95, 0);
+                        [-1.1, 1.1].forEach(ax => [-1, 1].forEach(s => {
+                            put(new THREE.CylinderGeometry(0.75, 0.75, 0.35, 10).rotateX(Math.PI / 2), black, bx + ax, 0.75, s * 1.7);
+                        }));
+                    });
+
+                    // ---- pantograph (middle car) ----
+                    if (hasPantograph) {
+                        const px = -2, y0 = 6.3;
+                        put(box(1.6, 0.2, 1.4), steel, px, 6.15, 0, roof);
+                        [-0.5, 0.5].forEach(z => {
+                            put(box(2.2, 0.12, 0.12), black, px + 0.7, y0 + 0.85, z, roof).rotation.z = 0.873;
+                            put(box(2.2, 0.12, 0.12), black, px + 0.7, y0 + 2.54, z, roof).rotation.z = -0.873;
+                        });
+                        put(box(0.25, 0.12, 2.4), black, px, y0 + 3.38, 0, roof);
+                    }
+
+                    // ---- hollow nose with the driver's cab ----
+                    if (hasNose) {
+                        put(loftSides(BODY, NOSE, end, L / 2, K), red, 0, 0, 0);                      // open shell
+                        put(capFan(NOSE, L / 2, K), plum, 0, 0, 0);                                   // dark front face (windshield)
+                        put(box(NOSE_LEN - 1.2, 0.2, 5.0), floorM, end + (NOSE_LEN - 1.2) / 2, 1.2, 0);   // cab floor
+                        put(box(0.6, 0.9, 4.2), black, L / 2 - 1.6, 1.75, 0);                         // dashboard
+                        put(box(0.7, 0.5, 0.7), seatM, L / 2 - 3.3, 1.55, 0);                         // driver seat
+
+                        const onFace = (geo, material, y, z, push = 0.05) => {
+                            const mesh = put(geo, material, frontX(y) + push * Math.cos(tilt), y + push * Math.sin(tilt), z);
+                            mesh.rotation.z = tilt;
+                        };
+                        onFace(new THREE.IcosahedronGeometry(0.3, 0), lamp, 2.0, -2.0, 0.1);          // headlights
+                        onFace(new THREE.IcosahedronGeometry(0.3, 0), lamp, 2.0, 2.0, 0.1);
+                        onFace(box(0.1, 0.55, 0.8), green, 4.75, -0.9, 0.06);                         // "B" sign
+                        onFace(new THREE.IcosahedronGeometry(0.3, 0), signRed, 4.75, 0.9, 0.08);      // "S" sign
+                        put(box(1, 0.6, 3.6), steel, L / 2 + 0.3, 1.15, 0);                           // bumper
+                        put(box(0.5, 0.35, 0.6), yellow, L / 2 + 1.0, 1.1, 0);                        // coupler
+                    }
+                    return car;
+                }
+
+                const train = new THREE.Group();
+                const front = makeCar(true, true);  front.position.x = 8.5;
+                // const mid   = makeCar(false, true);
+                const rear  = makeCar(true, true);  rear.position.x = -8.5;  rear.rotation.y = Math.PI;
+                train.add(front, rear);
+
+                // walkways between the cars: floor, two side walls and a roof, so you can walk from car to car
+                [0].forEach(x => {
+                    const part = (w, h, d, y, z) => { const m = new THREE.Mesh(box(w, h, d), black); m.position.set(x, y, z); train.add(m); };
+                    part(1, 0.2, 5.4, 1.2, 0);
+                    part(1, 4.6, 0.3, 3.3, 2.6);
+                    part(1, 4.6, 0.3, 3.3, -2.6);
+                    part(1, 0.3, 5.4, 5.75, 0);
+                });
+
+                train.traverse(o => { if (o.isMesh && o.material !== glass) { o.castShadow = true; o.receiveShadow = true; } });
+                train.userData.roofs = roofs;
+                return train;
+            }
+
+            const train_all = makeTrain();
+            const train_scale = 1.5;
+            train_all.scale.set(train_scale, train_scale, train_scale);
+            train_all.position.set(-railway_lenght/2, 0, -25);
+            scene.add(train_all);
+
+            // 4e. Build the anouncement board
+            const board = new THREE.Group();
+            const subboard1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 5, 7.5), metal2);
+            subboard1.position.set(22, 5, -10);
+            const subboard2a = new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,6), metal);
+            subboard2a.position.set(22, 5, -14);
+            const subboard2b = subboard2a.clone();
+            subboard2b.position.set(22, 5, -6);
+            board.add(subboard1);
+            board.add(subboard2a);
+            board.add(subboard2b);
+            platform.add(board);
+            addBlock(22, -10, 0.5, 8); 
+
+            // 4f. Build the bench
+            const bench = new THREE.Group();
+            const subbench1a = new THREE.Mesh(new THREE.BoxGeometry(0.3, 1, 1.7), metal)
+            subbench1a.position.set(0, 0, 0);
+            const subbench1b = subbench1a.clone();
+            subbench1a.position.set(2.5, 0, 0);
+            const subbench1c = subbench1a.clone();
+            subbench1c.position.set(-2.5, 0, 0);
+            const subbench2 = new THREE.Mesh(new THREE.BoxGeometry(6, .3, 2), bark)
+            subbench2.position.set(0, 0.65, 0);
+            bench.add(subbench1a);
+            bench.add(subbench1b);
+            bench.add(subbench1c);
+            bench.add(subbench2);
+            const bench1 = bench.clone();
+            bench1.position.set(10, 2.5, -5);
+            const bench2 = bench.clone();
+            bench2.position.set(0, 2.5, -5);
+            platform.add(bench1);
+            platform.add(bench2);
+
+            // 4g. Build the canopy
+            const canopy = new THREE.Group();
+            const subcanopy1a = new THREE.Group();
+            const subcanopy1aa = new THREE.Mesh(new THREE.CylinderGeometry(1, 1.3, 2.5, 4), metal);
+            subcanopy1aa.position.set(0, 0, 0);
+            subcanopy1aa.rotation.set(0, Math.PI / 4, 0);
+            const subcanopy1ab = new THREE.Mesh(new THREE.BoxGeometry(0.9, 6, 0.9), bark);
+            subcanopy1ab.position.set(0, 4, 0);
+            const subcanopy1ac = new THREE.Mesh(new trapezoidBox (1, 4, 2, 1), bark);
+            subcanopy1ac.position.set(0, 8, 0);
+            subcanopy1ac.rotation.set(0, Math.PI / 2, 0);
+            const subcanopy1ad = new THREE.Mesh(new trapezoidBox (8, 0, 2, 1), bark);
+            subcanopy1ad.position.set(0, 10, 0);
+            subcanopy1ad.rotation.set(0, Math.PI / 2, 0);
+            subcanopy1a.add(subcanopy1aa);
+            subcanopy1a.add(subcanopy1ab);
+            subcanopy1a.add(subcanopy1ac);
+            subcanopy1a.add(subcanopy1ad);
+            const subcanopy1b = subcanopy1a.clone();
+            subcanopy1b.position.set(10, 0, 0);
+            const subcanopy1c = subcanopy1a.clone();
+            subcanopy1c.position.set(-10, 0, 0);
+            const subcanopy2a = new THREE.Mesh(new THREE.BoxGeometry(25, 6, 0.3), metal);
+            subcanopy2a.position.set(0, 11 - 1/Math.sqrt(5)*3, -2/Math.sqrt(5)*3);
+            subcanopy2a.rotation.set(Math.PI / 2 - Math.atan(0.5), 0, 0);
+            const subcanopy2b = subcanopy2a.clone();
+            subcanopy2b.position.set(0, 11 - 1/Math.sqrt(5)*3, 2/Math.sqrt(5)*3);
+            subcanopy2b.rotation.set(Math.PI / 2 + Math.atan(0.5), 0, 0);
+            const subcanopy2c = new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, 25, 10), metal);
+            subcanopy2c.position.set(0, 11, 0);
+            subcanopy2c.rotation.set(0, 0, Math.PI / 2);
+            canopy.add(subcanopy1a);
+            canopy.add(subcanopy1b);
+            canopy.add(subcanopy1c);
+            canopy.add(subcanopy2a);
+            canopy.add(subcanopy2b);
+            canopy.add(subcanopy2c);
+            canopy.position.set(5, 3.2, -5);
+            scene.add(canopy);
+            addBlock(5, -5, 21, 1.3);
+            
+            // 4h. Build flower pot
+            const flower_pot = new THREE.Group();
+            const sketch = [
+                [0.0, 0.0],    // bottom center
+                [0.5, 0.0],    // base edge
+                [0.7, 0.3],    // lower circle
+                [0.8, 0.9],    // middle circle
+                [0.9, 1.6],    // upper circle
             ];
-            tiers.forEach(t => {
-                const cone = new THREE.Mesh(new THREE.ConeGeometry(t.r, t.h, 7), t.m);
-                cone.position.y = t.y;
-                cone.rotation.y = t.spin;   // turn each tier a bit so it looks less perfect
-                tree.add(cone);
+            const points = sketch.map(([x, y]) => new THREE.Vector2(x, y));     // 2D sketch
+            const geo = new THREE.LatheGeometry(points, 10);                     // revolve the sketch with 8 side
+            const vase = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ color: 0x1b9aaa, flatShading: true, side: THREE.DoubleSide })); // make a mesh
+            const flower = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(.1, .1, 3, 10), bark);
+            trunk.position.set(0, -1, 0);
+            const leaf = new THREE.Mesh(new THREE.IcosahedronGeometry(1.5, 1), leafC);
+            leaf.position.set(0, 1, 0);
+            flower.add(trunk);
+            flower.add(leaf);
+            flower.position.set(0, 3, 0);
+            flower_pot.add(vase);
+            flower_pot.add(flower);
+            const flower_pot1 = flower_pot.clone();
+            flower_pot1.position.set(-14,2,-2);
+            const flower_pot2 = flower_pot.clone();
+            flower_pot2.position.set(22,2,-2);
+            platform.add(flower_pot1);
+            platform.add(flower_pot2);
+            addBlock(-14, -2, 2, 2);
+            addBlock(22, -2, 2, 2);
+
+
+            // 5. Cat
+            let facing = 0, walkPhase = 0, moveAmount = 0, last = performance.now();
+            const camOffset = new THREE.Vector3(0, 20, 60);
+            const camTarget = new THREE.Vector3();
+            const fur = mat(0xf29b4b), furDark = mat(0xd9792b), white = mat(0xfff1e0);
+            const dark = mat(0x2b2350), pink = mat(0xff8fa3);  
+            const cat = new THREE.Group();
+            const body = new THREE.Group(); 
+            cat.add(body);
+            camera.position.copy(cat.position).add(camOffset);
+            
+            function box(w, h, d, m, x, y, z) {
+                const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m);
+                mesh.position.set(x, y, z);
+                return mesh;
+            }
+            body.add(box(0.7, 0.6, 1.3, fur, 0, 0.8, 0));               // torso
+            body.add(box(0.5, 0.25, 0.9, white, 0, 0.55, 0.05));       // belly patch
+            body.add(box(0.62, 0.52, 0.55, fur, 0, 1.2, 0.85));        // head
+            body.add(box(0.28, 0.2, 0.12, white, 0, 1.08, 1.15));      // snout
+            body.add(box(0.1, 0.08, 0.06, pink, 0, 1.15, 1.22));       // nose
+            body.add(box(0.1, 0.14, 0.05, dark, -0.17, 1.3, 1.13));    // left eye
+            body.add(box(0.1, 0.14, 0.05, dark, 0.17, 1.3, 1.13));     // right eye
+            [-1, 1].forEach(side => {                                  // ears: 4-sided cones
+                const ear = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.32, 4), furDark);
+                ear.position.set(side * 0.21, 1.6, 0.85);
+                ear.rotation.y = Math.PI / 4;
+                body.add(ear);
             });
-
-            // a few rocks: tiny 20-sided shapes (icosahedron with detail 0)
-            [[1.8, 0.2, 1.0, 0.4], [-1.6, 0.15, 1.4, 0.3], [-1.0, 0.12, -1.9, 0.25]].forEach(([x, y, z, s]) => {
-                const r = new THREE.Mesh(new THREE.IcosahedronGeometry(s, 0), rock);
-                r.position.set(x, y, z);
-                r.rotation.set(x, z, 0);
-                tree.add(r);
+            const legs = [];        // legs: each leg is a group whose pivot is at the top, so rotating it swings the whole leg
+            [[-0.22, 0.5], [0.22, 0.5], [-0.22, -0.5], [0.22, -0.5]].forEach(([x, z], i) => {
+                const leg = new THREE.Group();
+                leg.position.set(x, 0.55, z);
+                leg.add(box(0.18, 0.55, 0.18, fur, 0, -0.275, 0));
+                leg.add(box(0.2, 0.1, 0.24, white, 0, -0.5, 0.03));       // paw
+                leg.userData.phase = (i === 0 || i === 3) ? 0 : Math.PI;   // diagonal pairs move together
+                body.add(leg);
+                legs.push(leg);
             });
+            const tail = new THREE.Group();
+            const subtail = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, 1.0, 5), furDark);       // tail
+            subtail.position.set(0, 0.5, -1);
+            subtail.rotation.set(-0.9, 0, 0);
+            tail.add(subtail);
+            tail.position.set(0, 0.8, 0.1);
+            body.add(tail);
+            cat.position.set(0, 2, -10);
+            scene.add(cat);
 
-            scene.add(tree);
+            // Button pop up
+            function makeLetterBox(ch, { size = 1, depth = 0.16, res = 14, boxColor = 0xf2b632, letterColor = 0x2b2350 } = {}) {
+                // 1. draw the letter small on a hidden canvas
+                const c = document.createElement('canvas');
+                c.width = c.height = res;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#000';
+                ctx.font = `700 ${Math.round(res * 0.95)}px system-ui, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(ch, res / 2, res / 2 + res * 0.06);
 
-            // 5. DRAG TO ROTATE: remember where the pointer went down, then turn the tree
-            let dragging = false, lastX = 0, spin = 0.005;
-            stage.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; });
+                // 2. find the pixels that are filled
+                const data = ctx.getImageData(0, 0, res, res).data;
+                const cells = [];
+                for (let y = 0; y < res; y++)
+                    for (let x = 0; x < res; x++)
+                    if (data[(y * res + x) * 4 + 3] > 110) cells.push([x, y]);      // alpha channel above a threshold
+
+                // 3. the box (its bottom sits at y = 0)
+                const group = new THREE.Group();
+                const cube = new THREE.Mesh(
+                    new THREE.BoxGeometry(size, size, 0.3),
+                    new THREE.MeshLambertMaterial({ color: boxColor, flatShading: true })
+                );
+                cube.position.y = size / 2;
+                group.add(cube);
+
+                // 4. one raised block per filled pixel, all drawn in a single call
+                const cell = (size * 0.72) / res;                                    // the letter fills 72% of the face
+                const letters = new THREE.InstancedMesh(
+                    new THREE.BoxGeometry(cell * 1.02, cell * 1.02, depth),            // 1.02 closes tiny gaps between neighbours
+                    new THREE.MeshLambertMaterial({ color: letterColor, flatShading: true }),
+                    cells.length
+                );
+                const m = new THREE.Matrix4();
+                cells.forEach(([x, y], i) => {
+                    m.makeTranslation(
+                    (x - res / 2 + 0.5) * cell,                                      // across the face
+                    size / 2 + (res / 2 - y - 0.5) * cell,                           // canvas y points down, so flip it
+                    size / 2 + depth / 2 - 0.001                                     // sits on the front face, +z
+                    );
+                    letters.setMatrixAt(i, m);
+                });
+                letters.frustumCulled = false; 
+                letters.position.set(0, 0, -0.5);                                      // its culling box is tiny, at the origin
+                group.add(letters);
+
+                group.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+                return group;
+            }
+
+            function updateLetterBox(t) {
+                return Math.sin(t)/2;
+            }
+
+            const boxE = makeLetterBox('E');
+            boxE.position.set(cat.position.x, 3, cat.position.z);
+            let box_show = false;
+            function letter_show(x, z, w, d){
+                if (cat.position.x >= x-w/2 && cat.position.x <= x+w/2 && cat.position.z >= z-d/2 && cat.position.z <= z+d/2) {
+                    scene.add(boxE);
+                    box_show = true;
+                } else {
+                    scene.remove(boxE);
+                    box_show = false;
+                }
+            }
+
+            // Add scenery (Tree)
+            const rand = makeRandom(12345);                                                          // any number works as the seed
+            const trunk_b = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 1.8, 6), bark);
+            trunk_b.position.y = 0.9;
+            const cone1 = new THREE.Mesh(new THREE.ConeGeometry(1.7, 1.8, 7), leafA);
+            cone1.position.y = 2.1;
+            const cone2 = new THREE.Mesh(new THREE.ConeGeometry(1.3, 1.6, 7), leafB);
+            cone2.position.y = 3.0;
+            cone2.rotation.y = 0.4;
+            const treeGeo = mergeMeshes([trunk_b, cone1, cone2]);
+            const treeMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+            // Forest 1
+            let m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+            let up = new THREE.Vector3(0, 1, 0);
+            let COUNT = 300;
+            const forest = new THREE.InstancedMesh(treeGeo, treeMat, COUNT);
+            for (let i = 0; i < COUNT; i++) {
+                const scale = 1.7 + rand() * 0.8;                          // vary the size
+                p.set(rand() * 200 - 80, -1, rand() * 50 - 85);
+                q.setFromAxisAngle(up, rand() * Math.PI * 2);              // vary the turn
+                s.set(scale, scale * (0.9 + rand() * 0.3), scale);
+                m.compose(p, q, s);
+                forest.setMatrixAt(i, m);
+            }
+            forest.frustumCulled = false;     // the culling box only covers one tree at the origin, so turn it off
+            forest.castShadow = true;
+            forest.receiveShadow = true;
+            scene.add(forest);
+            // Forest 2
+            COUNT = 50;
+            const forest2 = new THREE.InstancedMesh(treeGeo, treeMat, COUNT);
+            for (let i = 0; i < COUNT; i++) {
+                const scale = 1.7 + rand() * 0.8;                          // vary the size
+                p.set(rand() * 80 + 40, -1, rand() * 40 - 15);
+                q.setFromAxisAngle(up, rand() * Math.PI * 2);              // vary the turn
+                s.set(scale, scale * (0.9 + rand() * 0.3), scale);
+                m.compose(p, q, s);
+                forest2.setMatrixAt(i, m);
+            }
+            forest2.frustumCulled = false;     // the culling box only covers one tree at the origin, so turn it off
+            forest2.castShadow = true;
+            forest2.receiveShadow = true;
+            scene.add(forest2);
+            
+            // Add scenery (Grass)
+            function makeGrassTuft() {
+                const white = new THREE.MeshBasicMaterial({ color: 0xffffff });    // mergeMeshes reads this color; the real tint comes later
+                const parts = [[0, 0.9, 0.00], [0.1, 0.65, 0.35], [-0.1, 0.7, -0.35]].map(([x, h, tilt], i) => {
+                    const g = new THREE.ConeGeometry(0.07, h, 3);
+                    g.translate(0, h / 2, 0);                                        // the base of the blade sits at y = 0
+                    const m = new THREE.Mesh(g, white);
+                    m.position.set(x, 0, i === 0 ? 0 : 0.05 * i);
+                    m.rotation.z = tilt * 0.4;                                       // lean outward
+                    m.rotation.y = i * 2.1;
+                    return m;
+                });
+                return mergeMeshes(parts);
+            }
+            const grassGeo = makeGrassTuft();
+            const grassMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+            function addGrassPatch(cx, cz, radius, count, seed = 1) {
+                const rand = 100;
+                const patch = new THREE.InstancedMesh(grassGeo, grassMat, count);
+                const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
+                const up = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
+
+                for (let i = 0; i < count; i++) {
+                    const r = radius * Math.sqrt(Math.random());                            // sqrt makes the spread even, not bunched in the middle
+                    const a = Math.random() * Math.PI * 2;
+                    const x = cx + Math.cos(a) * r;
+                    const z = cz + Math.sin(a) * r;
+
+                    const shrink = 1 - 0.5 * (r / radius) ** 2;                      // shorter blades toward the edge of the patch
+                    const size = (0.7 + Math.random() * 0.7) * shrink;
+
+                    p.set(x, getHeight(x, z)-1, z);                                    // stand on the terrain
+                    // p.set(x, getHeight(p.getX(i), p.getZ(i)), z);
+                    q.setFromAxisAngle(up, Math.random() * Math.PI * 2);
+                    s.set(size, size * (0.8 + Math.random() * 0.6), size);
+                    m.compose(p, q, s);
+                    patch.setMatrixAt(i, m);
+
+                    c.setHSL(0.27 + Math.random() * 0.08, 0.55, 0.32 + Math.random() * 0.14);      // varied greens
+                    patch.setColorAt(i, c);
+                }
+                patch.instanceMatrix.needsUpdate = true;
+                patch.instanceColor.needsUpdate = true;
+                patch.frustumCulled = false;                                       // the culling box only covers one blade at the origin
+                patch.receiveShadow = true;
+                scene.add(patch);
+                return patch;
+            }
+            addGrassPatch(-10, 10, 80, 500, 7); 
+            
+            // Add scenery (Water)
+            const WATER = 200, WSEG = 140, WATER_Y = -0.6;       // sea size, grid cells, sea level
+            const waterGeo = new THREE.PlaneGeometry(WATER*2, WATER, WSEG, WSEG);
+            waterGeo.rotateX(-Math.PI / 2);
+            const waterPos = waterGeo.attributes.position;
+            const waterBase = Float32Array.from(waterPos.array);   // remember each point's original x and z
+
+            const waterMat = new THREE.MeshPhongMaterial({ color: 0x3aa6c9, flatShading: true, shininess: 90, specular: 0x9fd8ff });
+            const water = new THREE.Mesh(waterGeo, waterMat);
+            water.position.set(0, -2, -180);
+            water.position.y = WATER_Y;
+            water.frustumCulled = false;                           // the box was measured while it was flat
+            scene.add(water);
+
+            function updateWater(t) {
+                const a = waterPos.array;
+                for (let i = 0; i < waterPos.count; i++) {
+                    const x = waterBase[i * 3], z = waterBase[i * 3 + 2];
+                    a[i * 3 + 1] = Math.sin(x * 0.22 + t * 1.1) * 0.18
+                                + Math.sin(z * 0.17 + t * 0.8) * 0.18
+                                + Math.sin((x + z) * 0.11 + t * 0.6) * 0.12;
+                }
+                waterPos.needsUpdate = true;
+            }
+
+            // Add scenery (Sand)
+            const beach = new THREE.Mesh(
+                frustumBox(200, 80, 200, 30, 4),   // wider at the bottom, so the sides slope outward
+                new THREE.MeshLambertMaterial({ color: 0xe6d3a3, flatShading: true })
+            );
+            beach.position.set(0, -1, -100);                            // its top sits just under the terrain edge
+            scene.add(beach);
+
+            // // Add scenery (Fog)
+            // const darkMode = window.matchMedia('(prefers-color-scheme: dark)');
+            // function applyTheme() {
+            //     const sky = darkMode.matches ? 0x14261c : 0xcfeee6;
+            //     scene.background = new THREE.Color(sky);
+            //     scene.fog = new THREE.Fog(sky, 130, 400);              // starts beyond the island, fully hazy at 400
+            //     waterMat.color.set(darkMode.matches ? 0x1d6f8a : 0x3aa6c9);
+            // }
+            // applyTheme();
+            // darkMode.addEventListener('change', applyTheme);
+
+            // Add shadow except platform
+            scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+            platform.castShadow = false;
+
+            // // Add edge line in all objects
+            // const lineMat = new THREE.LineBasicMaterial({ color: 0x14261c });
+            // const meshes = [];
+            // scene.traverse(obj => { if (obj.isMesh) meshes.push(obj); });
+            // meshes.forEach(obj => {
+            //     const edges = new THREE.LineSegments(new THREE.EdgesGeometry(obj.geometry), lineMat);
+            //     obj.add(edges);
+            // });
+
+            // 6a. Click to rotate and move camera
+            let dragging = false, lastX = 0, lastY = 0, spin = 0.005;
+            stage.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; lastY = e.clientY; });
             window.addEventListener('pointerup', () => { dragging = false; });
             window.addEventListener('pointermove', e => {
-            if (!dragging) return;
-            tree.rotation.y += (e.clientX - lastX) * 0.01;
-            lastX = e.clientX;
+                if (!dragging) return;
+                scene.rotation.x += (e.clientY - lastY) * spin;
+                scene.rotation.y += (e.clientX - lastX) * spin;
+                lastX = e.clientX;
+                lastY = e.clientY;
             });
+            
+            // 6b. Scroll to zoom
+            const views = [
+                { pos: camera.position.clone(),     look: new THREE.Vector3(0, 2, 0) },     // initial view
+                { pos: new THREE.Vector3(0, 4, 9),  look: new THREE.Vector3(0, 2, 0) },     // front
+                { pos: new THREE.Vector3(9, 4, 0),  look: new THREE.Vector3(0, 2, 0) },     // side
+                { pos: new THREE.Vector3(0, 14, 2), look: new THREE.Vector3(0, 0, 0) },     // top
+                { pos: new THREE.Vector3(-8, 6, 8), look: new THREE.Vector3(0, 1, 0) },     // corner
+            ];
+            let viewIndex = 0;
+            const camPos  = views[0].pos.clone();
+            const camLook = views[0].look.clone();
+            const offset  = new THREE.Vector3();
+            let zoom = 1, zoomTarget = 1;
+            stage.addEventListener('wheel', e => {
+                e.preventDefault();                          // stop the page from scrolling
+                zoomTarget *= e.deltaY < 0 ? 0.9 : 1.1;      // scroll up = closer, scroll down = farther
+                zoomTarget = Math.max(0.3, Math.min(2.5, zoomTarget));
+            }, { passive: false });
 
-            // 6. ANIMATION LOOP: the same idea as your game loop
-            function frame() {
-                if (!dragging) tree.rotation.y += spin;   // slow auto-rotate
+            // 6c. WASD to move the cat
+            const keys = {};
+            window.addEventListener('keydown', e => {
+                keys[e.code] = true;
+                if (e.code.startsWith('Arrow')) e.preventDefault();
+            });
+            window.addEventListener('keyup', e => { keys[e.code] = false; });
+            window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });  // no stuck keys
+
+            // 6d. Focus on announcement board
+            let board_focus = false;
+            let eWasDown = false;
+
+            function focus_on_board(box_show) {
+                const promptEl = document.getElementById('prompt');
+                const ePressed = keys.KeyE && !eWasDown;
+                eWasDown = !!keys.KeyE;
+
+                if (!box_show) {                          // the cat is away from the board
+                    board_focus = false;                    // leave focus mode too
+                    promptEl.textContent = '';              // clear the text
+                    promptEl.style.display = 'none';        // and hide the paragraph
+                    return;
+                }
+
+                if (ePressed) board_focus = !board_focus;
+
+                promptEl.style.display = 'block';
+                promptEl.style.color = '#000000';
+                promptEl.style.fontWeight = 'bold';
+                promptEl.style.letterSpacing = '0.05em';
+                promptEl.style.textAlign = 'center';
+                promptEl.style.bottom = '40px';
+                if (board_focus) {
+                    scene.remove(boxE);
+                    camera.position.set(7, 3, -10);
+                    camera.lookAt(22, 3, -10);
+                    promptEl.textContent = 'Press E to close';
+                } else {
+                    promptEl.textContent = 'Press E to read';   // or use '' here to show nothing while it's closed
+                    scene.add(boxE);
+                }
+            }
+
+
+            // ======================================================================= Function Start
+            // Build trapeoid mesh
+            function trapezoidBox(bottomW, topW, height, depth) {
+                const geo = new THREE.BoxGeometry(bottomW, height, depth);
+                const pos = geo.attributes.position;
+                const scale = topW / bottomW;
+
+                for (let i = 0; i < pos.count; i++) {
+                    if (pos.getY(i) > 0) {                    // top vertices only
+                        pos.setX(i, pos.getX(i) * scale);       // pull them in (or out)
+                    }
+                }
+                geo.computeVertexNormals();
+                return geo;
+            }
+
+            // Build trapeoid mesh
+            function frustumBox(bottomW, bottomD, topW, topD, height, offsetX = 0, offsetZ = 0) {
+                const geo = new THREE.BoxGeometry(bottomW, height, bottomD);
+                const pos = geo.attributes.position;
+                const sx = topW / bottomW;
+                const sz = topD / bottomD;
+
+                for (let i = 0; i < pos.count; i++) {
+                    if (pos.getY(i) > 0) {                                   // top vertices only
+                        pos.setX(i, pos.getX(i) * sx + offsetX);               // new top width, plus optional slide
+                        pos.setZ(i, pos.getZ(i) * sz + offsetZ);               // new top depth, plus optional slide
+                    }
+                }
+                pos.needsUpdate = true;
+                geo.computeVertexNormals();
+                return geo;
+            }
+
+            // Build ellipsoid mesh
+            function ball(rx, ry, rz, m, x, y, z, seg = 20) {
+                const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, seg, Math.round(seg * 0.7)), m);
+                mesh.scale.set(rx, ry, rz);
+                mesh.position.set(x, y, z);
+                return mesh;
+            }
+            
+             // turn angle a toward b by fraction t (shortest way)
+            function turnTo(a, b, t) {                                 
+                let d = b - a;
+                while (d > Math.PI) d -= Math.PI * 2;
+                while (d < -Math.PI) d += Math.PI * 2;
+                return a + d * t;
+            }
+
+            // Merge meshes
+            function mergeMeshes(meshes) {
+                const positions = [], colors = [];
+                meshes.forEach(m => {
+                    m.updateMatrix();                                   // bake this part's position, rotation, and scale
+                    const g = m.geometry.clone().applyMatrix4(m.matrix);
+                    const ng = g.index ? g.toNonIndexed() : g;          // no shared vertices, so flat shading works
+                    const pos = ng.attributes.position.array;
+                    const c = m.material.color;                         // each part keeps its own color
+                    for (let i = 0; i < pos.length; i += 3) {
+                    positions.push(pos[i], pos[i + 1], pos[i + 2]);
+                    colors.push(c.r, c.g, c.b);
+                    }
+                });
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                geo.setAttribute('color',    new THREE.Float32BufferAttribute(colors, 3));
+                geo.computeVertexNormals();
+                return geo;
+            }
+
+            // Obstacle can't walk through       
+            function addBlock(x, z, w, d) {                                                   // center x/z, width, depth, height
+                obstacles.push({ x0: x-w/2, x1: x+w/2, z0: z-d/2, z1: z+d/2 });
+            }
+            function pushOutOfRect(p, r, rc) {
+                // the point on the rectangle closest to the cat
+                const cx = Math.max(rc.x0, Math.min(p.x, rc.x1));
+                const cz = Math.max(rc.z0, Math.min(p.z, rc.z1));
+                const dx = p.x - cx, dz = p.z - cz;
+                const dist = Math.hypot(dx, dz);
+                if (dist >= r) return;                        // far enough away
+
+                if (dist > 0) {                               // outside the rectangle but touching it: push straight away
+                    p.x = cx + (dx / dist) * r;
+                    p.z = cz + (dz / dist) * r;
+                } else {                                      // the cat's center got inside: push out the nearest side
+                    const left = p.x - rc.x0, right = rc.x1 - p.x, up = p.z - rc.z0, down = rc.z1 - p.z;
+                    const m = Math.min(left, right, up, down);
+                    if (m === left)       p.x = rc.x0 - r;
+                    else if (m === right) p.x = rc.x1 + r;
+                    else if (m === up)    p.z = rc.z0 - r;
+                    else                  p.z = rc.z1 + r;
+                }
+            }
+
+            // Seed random
+            function makeRandom(seed) {                 // mulberry32, a small, fast seeded generator
+                return function () {
+                    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+                    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+                    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+                    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;     // a number from 0 up to (not including) 1
+                };
+            }
+            // ======================================================================= Function End
+
+
+            // 99. Animation Loop
+            let train_wait_time = 0;
+            function frame(now) {
+                // camera rotate and move
+                zoom += (zoomTarget - zoom) * 0.12;
+                offset.copy(camPos).sub(camLook).multiplyScalar(zoom);
+                // camera.position.copy(camLook).add(offset);
+                // camera.lookAt(camLook);
+
+                const dt = Math.min((now - last) / 1000, 0.05);
+                camTarget.copy(cat.position).add(camOffset);
+                camera.position.lerp(camTarget, 1 - Math.exp(-5 * dt));
+                camera.lookAt(cat.position.x, 0, cat.position.z);
+                
+                // train movement
+                switch (trainState) {
+                    case 'cruise':
+                        if (train_all.position.x >= -trainDistance && train_all.position.x < 10) {
+                            trainState = 'braking';
+                        }
+                        break;
+                    case 'braking':
+                        trainSpeed -= trainAccelaration;
+                        if (trainSpeed <= 0) {
+                            trainSpeed = 0;
+                            train_wait_time = 0;
+                            trainState = 'waiting';
+                        }
+                        break;
+                    case 'waiting':
+                        train_wait_time++;
+                        if (train_wait_time >= 300) trainState = 'departing';
+                        break;
+                    case 'departing':
+                        trainSpeed += trainAccelaration;
+                        if (trainSpeed >= trainMaxSpeed) {
+                            trainSpeed = trainMaxSpeed;
+                            trainState = 'cruise';
+                        }
+                        break;
+                }
+                train_all.position.x += trainSpeed;
+                if (train_all.position.x > railway_lenght/2) train_all.position.x = -railway_lenght/2;
+
+                // cat movement
+                last = now;
+
+                if (!board_focus){
+                    let dx = 0, dz = 0;
+                    if (keys.KeyW || keys.ArrowUp)    dz -= 1;
+                    if (keys.KeyS || keys.ArrowDown)  dz += 1;
+                    if (keys.KeyA || keys.ArrowLeft)  dx -= 1;
+                    if (keys.KeyD || keys.ArrowRight) dx += 1;
+                    const moving = dx !== 0 || dz !== 0;
+                    const speed = (keys.ShiftLeft || keys.ShiftRight) ? 9 : 5;
+                    if (moving) {
+                        const len = Math.hypot(dx, dz);                           // normalize so diagonals aren't faster
+                        dx /= len; dz /= len;
+                        cat.position.x += dx * speed * dt;
+                        cat.position.z += dz * speed * dt;
+                        facing = turnTo(facing, Math.atan2(dx, dz), 1 - Math.exp(-14 * dt));
+                    }
+                    cat.rotation.y = facing;
+                    // cat state : standing or walking
+                    moveAmount += ((moving ? 1 : 0) - moveAmount) * (1 - Math.exp(-10 * dt));
+                    walkPhase += dt * speed * 2.2 * (moving ? 1 : 0);
+                    legs.forEach(leg => { leg.rotation.x = Math.sin(walkPhase + leg.userData.phase) * 0.7 * moveAmount; });
+                    body.position.y = Math.abs(Math.sin(walkPhase)) * 0.08 * moveAmount + Math.sin(now / 600) * 0.01;
+                    tail.rotation.z = Math.sin(now / 350) * (0.25 + 0.15 * moveAmount);
+                    // cat limit
+                    cat.position.x = Math.max(-22, Math.min(22, cat.position.x));
+                    cat.position.z = Math.max(-18, Math.min(-2, cat.position.z));
+                    obstacles.forEach(rc => pushOutOfRect(cat.position, 1.5, rc));
+                }
+
+                // Letter box
+                letter_show(20, -10, 2, 8);
+                boxE.position.set(cat.position.x, updateLetterBox(now/1000)+7, cat.position.z);
+                focus_on_board(box_show);
+
+                // water movement
+                updateWater(now / 1000);
+
                 renderer.render(scene, camera);
                 requestAnimationFrame(frame);
+                
+                // in frame(), after renderer.render(...)
+                if (Math.random() < 0.01) {
+                    console.log(renderer.info.render.calls, 'draw calls', renderer.info.render.triangles, 'triangles');
+                    console.log(board_focus);
+                }
             }
 
             function resize() {
@@ -107,7 +1073,7 @@
             }
             window.addEventListener('resize', resize);
             resize();
-            frame();
+            requestAnimationFrame(frame);
         </script>
     </body>
 </html>
